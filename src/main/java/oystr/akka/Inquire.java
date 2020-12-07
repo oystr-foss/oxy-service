@@ -21,7 +21,7 @@ public class Inquire extends AbstractActor {
     }
 
     public static <T> CompletionStage<Object> inquire(ActorRef target, T msg, ActorSystem sys) {
-        Promise<?> promise = Promise.apply();
+        Promise promise = Promise.apply();
         sys.actorOf(Props.create(Inquire.class, target, promise)).tell(msg, target);
 
         // noinspection unchecked

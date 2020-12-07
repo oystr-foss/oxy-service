@@ -5,6 +5,10 @@ name := """oystr-registry-service"""
 version := "1.0-SNAPSHOT"
 maintainer := "luan.melo@oystr.com.br"
 
+PlayKeys.devSettings := Seq(
+  "play.server.http.port" -> "10000"
+)
+
 updateOptions := updateOptions.value.withLatestSnapshots(true)
 
 Compile / scalaSource       := baseDirectory.value / "src/main/java"
@@ -18,19 +22,31 @@ resolvers ++= Seq(
   Resolver.jcenterRepo
 )
 val AkkaVersion = "2.5.23"
-val HibernateVersion = "6.1.5.Final"
+val AkkaSttpVersion = "1.7.2"
+val HibernateValidatorVersion = "6.1.5.Final"
+val apacheCommonsVersion = "2.6"
 
 libraryDependencies ++= Seq(
   ws,
   guice,
   filters,
-  "javax.validation" % "validation-api" % "2.0.1.Final",
-  "org.hibernate.validator" % "hibernate-validator" % HibernateVersion,
-  "org.hibernate.validator" % "hibernate-validator-annotation-processor" % HibernateVersion,
-  "org.glassfish" % "javax.el" % "3.0.1-b11",
-  "com.typesafe.akka" % "akka-actor_2.13" % AkkaVersion,
-  "com.google.guava" % "guava" % "28.2-jre",
-  "org.projectlombok" % "lombok" % "1.18.12"
+  javaJpa,
+  "javax.validation"              % "validation-api"                           % "2.0.1.Final",
+  "org.hibernate.validator"       % "hibernate-validator"                      % HibernateValidatorVersion,
+  "org.hibernate.validator"       % "hibernate-validator-annotation-processor" % HibernateValidatorVersion,
+  "org.glassfish"                 % "javax.el"                                 % "3.0.1-b11",
+  "com.typesafe.akka"             % "akka-actor_2.13"                          % AkkaVersion,
+  "com.softwaremill.sttp"         %% "core"                                    % AkkaSttpVersion,
+  "com.softwaremill.sttp.client3" %% "okhttp-backend"                          % "3.0.0-RC11",
+  "com.softwaremill.sttp.client3" %% "async-http-client-backend-future"        % "3.0.0-RC11",
+  "com.google.guava"              % "guava"                                    % "28.2-jre",
+  "org.projectlombok"             % "lombok"                                   % "1.18.12",
+  "com.typesafe.play"             %% "play-caffeine-cache"                     % "2.8.0-M4",
+  "commons-io"                    %  "commons-io"                              % apacheCommonsVersion,
+  "commons-lang"                  %  "commons-lang"                            % apacheCommonsVersion,
+  "org.asynchttpclient"           % "async-http-client"                        % "2.12.1",
+  "org.postgresql"                % "postgresql"                               % "42.2.18",
+  "org.hibernate"                 % "hibernate-core"                           % "5.4.25.Final"
 )
 
 lazy val root = (project in file("."))

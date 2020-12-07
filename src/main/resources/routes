@@ -1,7 +1,7 @@
-#GET    /services/random                     oystr.controllers.RegistryController.findRandom
-#GET    /services/all                        oystr.controllers.RegistryController.findAll
-#GET    /services                            oystr.controllers.RegistryController.findAllActive
+GET    /services/random                     oystr.controllers.RegistryController.findRandom
+GET    /services/all                        oystr.controllers.RegistryController.findAll
+GET    /services                            oystr.controllers.RegistryController.findAllActive
 POST   /services                            oystr.controllers.RegistryController.register(req: Request)
-#DELETE /services/flush                      oystr.controllers.RegistryController.flush
-#DELETE /services/:service/:host/:port       oystr.controllers.RegistryController.delete
-#GET    /lb                                  oystr.controllers.RegistryController.loadBalancer
+DELETE /services/flush                      oystr.controllers.RegistryController.flush
+DELETE /services/:service/:host/:port       oystr.controllers.RegistryController.delete(service: String, host: String, port: Integer)
+GET    /lb                                  oystr.controllers.RegistryController.loadBalancer(req: Request)

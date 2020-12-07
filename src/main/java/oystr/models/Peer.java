@@ -6,6 +6,7 @@ import lombok.*;
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
 import java.time.LocalDateTime;
+import java.util.Base64;
 import java.util.Optional;
 
 @AllArgsConstructor
@@ -13,7 +14,7 @@ import java.util.Optional;
 @EqualsAndHashCode
 @Data
 @Builder
-public class Service {
+public class Peer {
     @JsonProperty(value = "service_id", required = true)
     @NotBlank
     private String serviceId;
@@ -34,8 +35,15 @@ public class Service {
     @JsonProperty(value = "registered_at")
     private LocalDateTime registeredAt;
 
+    private PeerState state;
+
     @Override
     public String toString() {
         return String.format("[%s] %s:%s -> (registered_at: %s | last_health_check: %s)", serviceId, host, port, registeredAt, lastHealthCheck);
+    }
+
+    public String toHash() {
+        String payload = String.format("%s-%s-%s", serviceId, host, port);
+        return Base64.getEncoder().encodeToString(payload.getBytes());
     }
 }
