@@ -36,6 +36,8 @@ public class PeersRegistryActor extends AbstractActor {
 
     private final RequestMetadataRepository repo;
 
+    private final String healthCheckUrl;
+
     public PeersRegistryActor(Services services, HttpClient<WSResponse> http, RequestMetadataRepository repo) {
         this.repo = repo;
         this.loadBalancerUrl = services.conf().getString("oplb.url");
@@ -45,12 +47,15 @@ public class PeersRegistryActor extends AbstractActor {
             .build();
         this.logger = services.logger("application");
 
-        Duration interval = services.conf().getDuration("oxy.health-check");
+        Duration delay = services.conf().getDuration("oxy.health-check.delay");
+        Duration interval = services.conf().getDuration("oxy.health-check.interval");
+        this.healthCheckUrl = services.conf().getString("oxy.health-check.url");
+
         services
             .sys()
             .scheduler()
             .schedule(
-                Duration.ofSeconds(15),
+                delay,
                 interval,
                 getSelf(),
                 new HealthCheck(),
@@ -59,13 +64,13 @@ public class PeersRegistryActor extends AbstractActor {
             );
     }
 
-    public void healthCheck() {
+    private void healthCheck() {
         ConcurrentMap<String, Peer> peers = cache.asMap();
         peers.forEach((key, value) -> {
             ProxyServer proxy = new ProxyServer.Builder(value.getHost(), value.getPort()).build();
 
             try {
-                http.get("https://ipinfo.io/", proxy).get(5, TimeUnit.SECONDS);
+                http.get(healthCheckUrl, proxy).get(5, TimeUnit.SECONDS);
                 value.setLastHealthCheck(LocalDateTime.now());
                 value.setState(RUNNING);
                 cache.put(key, value);
@@ -163,13 +168,13 @@ public class PeersRegistryActor extends AbstractActor {
         return Optional.of(Json.toJson(listServices.get(idx)));
     }
 
-    public List<Peer> getRunningPeers()
+    private List<Peer> getRunningPeers()
     {
         return cache.asMap()
-                .values()
-                .stream()
-                .filter(s -> s.getState().equals(PeerState.RUNNING))
-                .collect(Collectors.toList());
+            .values()
+            .stream()
+            .filter(s -> s.getState().equals(PeerState.RUNNING))
+            .collect(Collectors.toList());
     }
 
     public void flush() {
