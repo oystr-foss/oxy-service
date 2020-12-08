@@ -2,7 +2,7 @@ import sbt.Keys._
 
 scalaVersion := "2.13.3"
 name := """oystr-registry-service"""
-version := "1.0-SNAPSHOT"
+version := "1.0.0"
 maintainer := "luan.melo@oystr.com.br"
 
 PlayKeys.devSettings := Seq(
