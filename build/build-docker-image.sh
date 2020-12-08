@@ -24,4 +24,4 @@ EOF
 chmod +x tmp/run
 cd tmp || exit
 
-docker build -t "${name}":v1.0.0 .
+docker build -t "${name}":v0.0.1 .
