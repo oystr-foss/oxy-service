@@ -9,8 +9,10 @@ PlayKeys.devSettings := Seq(
   "play.server.http.port" -> "10000"
 )
 
-updateOptions := updateOptions.value.withLatestSnapshots(true)
+// Ref: https://www.playframework.com/documentation/2.8.x/JavaJPA#Deploying-Play-with-JPA
+PlayKeys.externalizeResourcesExcludes += baseDirectory.value / "src" / "main" / "resources" / "META-INF" / "persistence.xml"
 
+updateOptions := updateOptions.value.withLatestSnapshots(true)
 Compile / scalaSource       := baseDirectory.value / "src/main/java"
 Compile / resourceDirectory := baseDirectory.value / "src/main/resources"
 
