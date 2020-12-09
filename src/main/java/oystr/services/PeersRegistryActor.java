@@ -5,6 +5,8 @@ import akka.actor.ActorRef;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.typesafe.config.Config;
+import org.asynchttpclient.proxy.ProxyServer;
 import oystr.models.Peer;
 import oystr.models.PeerState;
 import oystr.models.RequestMetadata;
@@ -13,7 +15,6 @@ import oystr.models.messages.*;
 import play.Logger;
 import play.libs.Json;
 import play.libs.ws.WSResponse;
-import org.asynchttpclient.proxy.ProxyServer;
 import scala.concurrent.ExecutionContext;
 
 import java.time.Duration;
@@ -38,18 +39,21 @@ public class PeersRegistryActor extends AbstractActor {
 
     private final String healthCheckUrl;
 
+    private Map<String, Peer> luminatiPeers;
+
     public PeersRegistryActor(Services services, HttpClient<WSResponse> http, RequestMetadataRepository repo) {
+        Config conf = services.conf();
         this.repo = repo;
-        this.loadBalancerUrl = services.conf().getString("oplb.url");
+        this.loadBalancerUrl = conf.getString("oplb.url");
         this.http = http;
         this.cache = Caffeine.newBuilder()
             .maximumSize(100)
             .build();
         this.logger = services.logger("application");
 
-        Duration delay = services.conf().getDuration("oxy.health-check.delay");
-        Duration interval = services.conf().getDuration("oxy.health-check.interval");
-        this.healthCheckUrl = services.conf().getString("oxy.health-check.url");
+        Duration delay = conf.getDuration("oxy.health-check.delay");
+        Duration interval = conf.getDuration("oxy.health-check.interval");
+        this.healthCheckUrl = conf.getString("oxy.health-check.url");
 
         services
             .sys()
@@ -62,6 +66,15 @@ public class PeersRegistryActor extends AbstractActor {
                 ExecutionContext.global(),
                 ActorRef.noSender()
             );
+
+        if(conf.hasPath("luminati.address")) {
+            String luminatiAddress = conf.getString("luminati.address");
+            Peer default1 = Peer.builder().name("default1").host(luminatiAddress).port(24000).build();
+            Peer default2 = Peer.builder().name("default2").host(luminatiAddress).port(24001).build();
+            luminatiPeers = new HashMap<>();
+            luminatiPeers.put(default1.toHash(), default1);
+            luminatiPeers.put(default2.toHash(), default2);
+        }
     }
 
     private void healthCheck() {
@@ -148,16 +161,21 @@ public class PeersRegistryActor extends AbstractActor {
     }
 
     public JsonNode findAll() {
-        return Json.toJson(cache.asMap().values());
+        return cache.estimatedSize() == 0 && luminatiPeers != null ?
+                Json.toJson(luminatiPeers.values()) :
+                Json.toJson(cache.asMap().values());
     }
 
     public JsonNode findAllActive() {
         List<Peer> listServices = getRunningPeers();
-        return Json.toJson(listServices);
+        return listServices.isEmpty() && luminatiPeers != null ?
+                Json.toJson(luminatiPeers.values()) :
+                Json.toJson(listServices);
     }
 
     public Optional<JsonNode> findRandom(Boolean onlyRunning) {
-        List<Peer> listServices =  onlyRunning ? getRunningPeers() : new ArrayList<>(cache.asMap().values());
+        Collection<Peer> peers = cache.estimatedSize() == 0 && luminatiPeers != null ? luminatiPeers.values() : cache.asMap().values();
+        List<Peer> listServices =  onlyRunning ? getRunningPeers() : new ArrayList<>(peers);
 
         if(listServices.isEmpty()) {
             return Optional.empty();
