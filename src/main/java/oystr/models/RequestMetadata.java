@@ -10,8 +10,7 @@ import javax.validation.constraints.NotBlank;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-import org.hibernate.annotations.Generated;
-import org.hibernate.annotations.GenericGenerator;
+import org.hibernate.annotations.Type;
 
 @AllArgsConstructor
 @NoArgsConstructor
@@ -20,9 +19,9 @@ import org.hibernate.annotations.GenericGenerator;
 @Entity(name = "metadata")
 public class RequestMetadata {
     @Id
-    @GeneratedValue(generator = "UUID")
-    @GenericGenerator(name = "UUID", strategy = "org.hibernate.id.UUIDGenerator")
-    @Column(name = "id", nullable = false, updatable = false)
+    @GeneratedValue(strategy = GenerationType.AUTO)
+    @Column(name = "id", columnDefinition = "UUID", unique = true, nullable = false, updatable = false)
+    @Type(type = "org.hibernate.type.PostgresUUIDType")
     private UUID id;
 
     @NotBlank

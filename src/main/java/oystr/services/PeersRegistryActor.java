@@ -150,8 +150,7 @@ public class PeersRegistryActor extends AbstractActor {
             .match(MetadataRequest.class, req -> {
                 if(req.getExecutionId().isPresent()) {
                     String execution = req.getExecutionId().get();
-                    UUID id = UUID.randomUUID();
-                    RequestMetadata metadata = RequestMetadata.builder().execution(execution).id(id).build();
+                    RequestMetadata metadata = RequestMetadata.builder().execution(execution).build();
                     repo.add(metadata);
                 }
                 getSender().tell(loadBalancerUrl, getSelf());
