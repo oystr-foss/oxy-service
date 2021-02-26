@@ -2,6 +2,7 @@ package oystr.services;
 
 import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
+import akka.actor.Scheduler;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -17,11 +18,12 @@ import play.libs.Json;
 import play.libs.ws.WSResponse;
 import scala.concurrent.ExecutionContext;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static oystr.models.PeerState.*;
@@ -37,7 +39,7 @@ public class PeersRegistryActor extends AbstractActor {
 
     private final RequestMetadataRepository repo;
 
-    private final String healthCheckUrl;
+    private final String checkUrl;
 
     private Map<String, Peer> luminatiPeers;
 
@@ -47,25 +49,34 @@ public class PeersRegistryActor extends AbstractActor {
         this.loadBalancerUrl = conf.getString("oplb.url");
         this.http = http;
         this.cache = Caffeine.newBuilder()
-            .maximumSize(100)
+            .maximumSize(200)
             .build();
         this.logger = services.logger("application");
 
-        Duration delay = conf.getDuration("oxy.health-check.delay");
-        Duration interval = conf.getDuration("oxy.health-check.interval");
-        this.healthCheckUrl = conf.getString("oxy.health-check.url");
+        Duration healthCheckDelay = conf.getDuration("oxy.health-check.delay");
+        Duration healthCheckInterval = conf.getDuration("oxy.health-check.interval");
+        Duration discoveryDelay = conf.getDuration("oxy.discovery.delay");
+        Duration discoveryInterval = conf.getDuration("oxy.discovery.interval");
+        this.checkUrl = conf.getString("oxy.check.url");
 
-        services
-            .sys()
-            .scheduler()
-            .schedule(
-                delay,
-                interval,
-                getSelf(),
-                new HealthCheck(),
-                ExecutionContext.global(),
-                ActorRef.noSender()
-            );
+        Scheduler scheduler = services.sys().scheduler();
+        scheduler.schedule(
+            healthCheckDelay,
+            healthCheckInterval,
+            getSelf(),
+            new HealthCheck(),
+            ExecutionContext.global(),
+            ActorRef.noSender()
+        );
+
+        scheduler.schedule(
+            discoveryDelay,
+            discoveryInterval,
+            getSelf(),
+            new Discovery(),
+            ExecutionContext.global(),
+            ActorRef.noSender()
+        );
 
         if(conf.hasPath("luminati.address")) {
             String luminatiAddress = conf.getString("luminati.address");
@@ -81,47 +92,83 @@ public class PeersRegistryActor extends AbstractActor {
         ConcurrentMap<String, Peer> peers = cache.asMap();
         peers.forEach((key, value) -> {
             ProxyServer proxy = new ProxyServer.Builder(value.getHost(), value.getPort()).build();
-
-            try {
-                http.get(healthCheckUrl, proxy).get(5, TimeUnit.SECONDS);
-                value.setLastHealthCheck(LocalDateTime.now());
-                value.setState(RUNNING);
-                cache.put(key, value);
-            } catch (Exception e) {
-                value.setLastHealthCheck(LocalDateTime.now());
-                switch (value.getState()) {
-                    case UNKNOWN:
-                    case RUNNING:
-                        value.setState(PENDING);
-                        cache.put(key, value);
-                        break;
-                    case PENDING:
-                        value.setState(FAILING);
-                        cache.put(key, value);
-                        break;
-                    case FAILING:
-                        value.setState(DISABLED);
-                        cache.put(key, value);
-                        break;
-                    case DISABLED:
-                        logger.debug("Peer removed: " + value);
-                        cache.invalidate(key);
-                }
-            }
+            http
+                .get(checkUrl, proxy)
+                .whenCompleteAsync((res, err) -> {
+                    if(err != null || res.getStatus() != 200) {
+                        value.setLastHealthCheck(LocalDateTime.now());
+                        switch (value.getState()) {
+                            case UNKNOWN:
+                            case RUNNING:
+                                value.setState(PENDING);
+                                cache.put(key, value);
+                                break;
+                            case PENDING:
+                                value.setState(FAILING);
+                                cache.put(key, value);
+                                break;
+                            case FAILING:
+                                value.setState(DISABLED);
+                                cache.put(key, value);
+                                break;
+                            case DISABLED:
+                                logger.debug("Peer removed: " + value);
+                                cache.invalidate(key);
+                        }
+                        return;
+                    }
+                    value.setLastHealthCheck(LocalDateTime.now());
+                    value.setState(RUNNING);
+                    cache.put(key, value);
+                });
         });
     }
 
     @Override
     public Receive createReceive() {
         return receiveBuilder()
+            .match(Discovery.class, req -> {
+                // TODO: It's our internal use case. Since we inside the OpenVPN server, we discover may clients automatically.
+                // TODO: Are we going to be under the same container or at least share the /tmp directory?
+                System.out.println("Discovering");
+                String[] cmd = {"/bin/sh", "-c", "cat /tmp/openvpn-status.log | grep \"192.168.255\" | awk -F\",\" '{print $1 \" \" $2}'"};
+                Process p = Runtime.getRuntime().exec(cmd);
+                p.waitFor();
+
+                BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
+                String line;
+                while((line = reader.readLine()) != null) {
+                    String[] raw = line.split(" ");
+                    if(raw.length < 2) {
+                        continue;
+                    }
+
+                    String host = raw[0];
+                    String name = raw[1];
+                    Peer peer = Peer
+                        .builder()
+                        .serviceId(String.format("proxy-%s", name))
+                        .host(host)
+                        .port(8888)
+                        .name(name)
+                        .registeredAt(LocalDateTime.now())
+                        .state(UNKNOWN)
+                        .build();
+
+                    Peer existingPeer = cache.getIfPresent(peer.toHash());
+                    if(existingPeer == null || existingPeer.getState() == DISABLED) {
+                        System.out.printf("Discovered: %s%n", peer);
+                        cache.put(peer.toHash(), peer);
+                    }
+                }
+            })
             .match(HealthCheck.class, req -> {
                 if(cache.estimatedSize() == 0) {
                     return;
                 }
 
-                logger.debug("starting health check with " + cache.estimatedSize() + " peers registered (even those not running)");
+                logger.debug("running health check with " + cache.estimatedSize() + " registered peers (even those not running)");
                 healthCheck();
-                logger.debug("finished health check with " + cache.estimatedSize() + " peers registered (even those not running)");
             })
             .match(AddPeerRequest.class, req -> {
                 Peer peer = req.getPeer();
