@@ -5,6 +5,7 @@ if [ -d "tmp" ]; then
 fi
 
 name=oxy-service
+version=$1
 playSecret=$(head -c 32 /dev/urandom | base64)
 
 echo "Building ${name}"
@@ -24,4 +25,4 @@ EOF
 chmod +x tmp/run
 cd tmp || exit
 
-docker build -t "${name}":v0.0.1 .
+docker build --no-cache -t "${name}":"${version}" .
