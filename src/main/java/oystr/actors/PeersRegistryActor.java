@@ -1,4 +1,4 @@
-package oystr.services;
+package oystr.actors;
 
 import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
@@ -7,15 +7,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.typesafe.config.Config;
+import org.asynchttpclient.Response;
 import org.asynchttpclient.proxy.ProxyServer;
 import oystr.models.Peer;
 import oystr.models.PeerState;
-import oystr.models.RequestMetadata;
-import oystr.models.dao.RequestMetadataRepository;
 import oystr.models.messages.*;
+import oystr.services.HttpClient;
+import oystr.services.Services;
 import play.Logger;
 import play.libs.Json;
-import play.libs.ws.WSResponse;
 import scala.concurrent.ExecutionContext;
 
 import java.io.BufferedReader;
@@ -29,7 +29,7 @@ import java.util.stream.Collectors;
 import static oystr.models.PeerState.*;
 
 public class PeersRegistryActor extends AbstractActor {
-    private final HttpClient<WSResponse> http;
+    private final HttpClient<Response> http;
 
     private final Cache<String, Peer> cache;
 
@@ -37,18 +37,16 @@ public class PeersRegistryActor extends AbstractActor {
 
     private final Logger.ALogger logger;
 
-    private final RequestMetadataRepository repo;
-
     private final String checkUrl;
 
     private Map<String, Peer> luminatiPeers;
 
-    public PeersRegistryActor(Services services, HttpClient<WSResponse> http, RequestMetadataRepository repo) {
+    public PeersRegistryActor(Services services, HttpClient<Response> http) {
         Config conf = services.conf();
-        this.repo = repo;
         this.loadBalancerUrl = conf.getString("oplb.url");
         this.http = http;
-        this.cache = Caffeine.newBuilder()
+        this.cache = Caffeine
+            .newBuilder()
             .maximumSize(200)
             .build();
         this.logger = services.logger("application");
@@ -57,7 +55,7 @@ public class PeersRegistryActor extends AbstractActor {
         Duration healthCheckInterval = conf.getDuration("oxy.health-check.interval");
         Duration discoveryDelay = conf.getDuration("oxy.discovery.delay");
         Duration discoveryInterval = conf.getDuration("oxy.discovery.interval");
-        this.checkUrl = conf.getString("oxy.check.url");
+        this.checkUrl = conf.getString("oxy.health-check.url");
 
         Scheduler scheduler = services.sys().scheduler();
         scheduler.schedule(
@@ -92,10 +90,12 @@ public class PeersRegistryActor extends AbstractActor {
         ConcurrentMap<String, Peer> peers = cache.asMap();
         peers.forEach((key, value) -> {
             ProxyServer proxy = new ProxyServer.Builder(value.getHost(), value.getPort()).build();
+
             http
-                .get(checkUrl, proxy)
+                .head(checkUrl, proxy)
                 .whenCompleteAsync((res, err) -> {
-                    if(err != null || res.getStatus() != 200) {
+                    logger.debug(String.format("healthcheck finished for %s with %d and %s", value.toString(), res.getStatusCode(), err));
+                    if(err != null || res.getStatusCode() != 200) {
                         value.setLastHealthCheck(LocalDateTime.now());
                         switch (value.getState()) {
                             case UNKNOWN:
@@ -128,9 +128,8 @@ public class PeersRegistryActor extends AbstractActor {
     public Receive createReceive() {
         return receiveBuilder()
             .match(Discovery.class, req -> {
-                // TODO: It's our internal use case. Since we inside the OpenVPN server, we discover may clients automatically.
-                // TODO: Are we going to be under the same container or at least share the /tmp directory?
-                System.out.println("Discovering");
+                // TODO: It's our internal use case. Since we OpenVPN knows who are connected, we may discover clients automatically.
+                // TODO: We are sharing the /tmp directory of both containers.
                 String[] cmd = {"/bin/sh", "-c", "cat /tmp/openvpn-status.log | grep \"192.168.255\" | awk -F\",\" '{print $1 \" \" $2}'"};
                 Process p = Runtime.getRuntime().exec(cmd);
                 p.waitFor();
@@ -157,7 +156,7 @@ public class PeersRegistryActor extends AbstractActor {
 
                     Peer existingPeer = cache.getIfPresent(peer.toHash());
                     if(existingPeer == null || existingPeer.getState() == DISABLED) {
-                        System.out.printf("Discovered: %s%n", peer);
+                        logger.info(String.format("Discovered: %s", peer));
                         cache.put(peer.toHash(), peer);
                     }
                 }
@@ -197,8 +196,9 @@ public class PeersRegistryActor extends AbstractActor {
             .match(MetadataRequest.class, req -> {
                 if(req.getExecutionId().isPresent()) {
                     String execution = req.getExecutionId().get();
-                    RequestMetadata metadata = RequestMetadata.builder().execution(execution).build();
-                    repo.add(metadata);
+                    getContext()
+                        .findChild("metrics-actor")
+                        .ifPresent(actor -> actor.tell(execution, getSelf()));
                 }
                 getSender().tell(loadBalancerUrl, getSelf());
             })
@@ -208,17 +208,18 @@ public class PeersRegistryActor extends AbstractActor {
 
     public JsonNode findAll() {
         return cache.estimatedSize() == 0 && luminatiPeers != null ?
-                Json.toJson(luminatiPeers.values()) :
-                Json.toJson(cache.asMap().values());
+            Json.toJson(luminatiPeers.values()) :
+            Json.toJson(cache.asMap().values());
     }
 
     public JsonNode findAllActive() {
         List<Peer> listServices = getRunningPeers();
         return listServices.isEmpty() && luminatiPeers != null ?
-                Json.toJson(luminatiPeers.values()) :
-                Json.toJson(listServices);
+            Json.toJson(luminatiPeers.values()) :
+            Json.toJson(listServices);
     }
 
+    @SuppressWarnings("WrapperTypeMayBePrimitive")
     public Optional<JsonNode> findRandom(Boolean onlyRunning) {
         Collection<Peer> peers = cache.estimatedSize() == 0 && luminatiPeers != null ? luminatiPeers.values() : cache.asMap().values();
         List<Peer> listServices =  onlyRunning ? getRunningPeers() : new ArrayList<>(peers);

@@ -1,10 +1,8 @@
 import com.google.inject.AbstractModule;
 import org.asynchttpclient.AsyncHttpClient;
-import org.asynchttpclient.DefaultAsyncHttpClient;
+import static org.asynchttpclient.Dsl.asyncHttpClient;
 import oystr.akka.RootActors;
 import oystr.akka.RootActorsImpl;
-import oystr.models.dao.JPARequestMetadataRepository;
-import oystr.models.dao.RequestMetadataRepository;
 import oystr.services.HttpClient;
 import oystr.services.Services;
 import oystr.services.impl.BasicServices;
@@ -18,8 +16,7 @@ public class Module extends AbstractModule {
         bind(Clock.class).toInstance(Clock.systemDefaultZone());
         bind(Services.class).to(BasicServices.class).asEagerSingleton();
         bind(RootActors.class).to(RootActorsImpl.class).asEagerSingleton();
-        bind(RequestMetadataRepository.class).to(JPARequestMetadataRepository.class).asEagerSingleton();
-        bind(AsyncHttpClient.class).toInstance(new DefaultAsyncHttpClient());
+        bind(AsyncHttpClient.class).toInstance(asyncHttpClient());
         bind(HttpClient.class).to(FutureBasedHttpClient.class);
     }
 }
