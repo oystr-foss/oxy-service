@@ -1,4 +1,3 @@
-GET    /services/random                     oystr.controllers.RegistryController.findRandom
 GET    /services/all                        oystr.controllers.RegistryController.findAll
 GET    /services                            oystr.controllers.RegistryController.findAllActive
 POST   /services                            oystr.controllers.RegistryController.register(req: Request)
