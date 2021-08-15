@@ -4,6 +4,9 @@ import akka.actor.ActorRef;
 import akka.actor.Props;
 import oystr.actors.MetricsCollectorActor;
 import oystr.actors.PeersRegistryActor;
+import oystr.models.Peer;
+import oystr.services.CacheClient;
+import oystr.services.Codec;
 import oystr.services.HttpClient;
 import oystr.services.Services;
 
@@ -15,10 +18,10 @@ public class RootActorsImpl implements RootActors {
     private final ActorRef metricsActor;
 
     @Inject
-    public RootActorsImpl(HttpClient http, Services services) {
+    public RootActorsImpl(HttpClient http, Services services, CacheClient cacheClient) {
         this.peersRegistryActor = services
             .sys()
-            .actorOf(Props.create(PeersRegistryActor.class, services, http), "peers-registry-actor");
+            .actorOf(Props.create(PeersRegistryActor.class, services, http, cacheClient), "peers-registry-actor");
 
         this.metricsActor = services
             .sys()

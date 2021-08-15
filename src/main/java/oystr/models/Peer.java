@@ -5,6 +5,7 @@ import lombok.*;
 
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
+import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.Optional;
@@ -14,7 +15,7 @@ import java.util.Optional;
 @EqualsAndHashCode
 @Data
 @Builder
-public class Peer {
+public class Peer implements Serializable {
     @JsonProperty(value = "service_id", required = true)
     @NotBlank
     private String serviceId;
