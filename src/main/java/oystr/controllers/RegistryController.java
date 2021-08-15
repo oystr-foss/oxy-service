@@ -90,11 +90,11 @@ public class RegistryController extends Controller {
     }
 
     public CompletionStage<Result> findAll() {
-        return find(false, false);
+        return find(false);
     }
 
     public CompletionStage<Result> findAllActive() {
-        return find(true, false);
+        return find(true);
     }
 
     public CompletionStage<Result> flush() {
@@ -113,19 +113,14 @@ public class RegistryController extends Controller {
         return delete(req);
     }
 
-    public CompletionStage<Result> findRandom() {
-        return find(false, true);
-    }
-
     private <T> List<ObjectNode> validate(T data) {
         return validator.validate(data);
     }
 
-    public CompletionStage<Result> find(Boolean onlyRunning, Boolean random) {
+    public CompletionStage<Result> find(Boolean onlyRunning) {
         FindPeersRequest req = FindPeersRequest
             .builder()
             .onlyRunning(onlyRunning)
-            .random(random)
             .build();
 
         return Inquire

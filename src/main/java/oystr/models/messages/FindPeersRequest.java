@@ -10,7 +10,4 @@ import lombok.Data;
 public class FindPeersRequest {
     @Builder.Default
     private Boolean onlyRunning = false;
-
-    @Builder.Default
-    private Boolean random = false;
 }
