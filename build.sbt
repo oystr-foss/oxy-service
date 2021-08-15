@@ -2,8 +2,8 @@ import sbt.Keys._
 
 scalaVersion := "2.13.3"
 name := """oystr-registry-service"""
-version := "0.0.1"
-maintainer := "luan.melo@oystr.com.br"
+version := "v1.0.0"
+maintainer := "rafael.silverio.it@gmail.com"
 
 PlayKeys.devSettings := Seq(
   "play.server.http.port" -> "10000"
@@ -35,7 +35,6 @@ libraryDependencies ++= Seq(
   "org.glassfish"                 %  "javax.el"                                 % "3.0.1-b11",
   "com.typesafe.akka"             %  "akka-actor_2.13"                          % akkaVersion,
   "com.google.guava"              %  "guava"                                    % "28.2-jre",
-  "org.projectlombok"             %  "lombok"                                   % "1.18.12",
   "com.typesafe.play"             %% "play-caffeine-cache"                      % "2.8.0-M4",
   "commons-io"                    %  "commons-io"                               % apacheCommonsVersion,
   "commons-lang"                  %  "commons-lang"                             % apacheCommonsVersion,
