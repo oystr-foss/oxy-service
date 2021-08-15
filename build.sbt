@@ -34,13 +34,14 @@ libraryDependencies ++= Seq(
   "org.hibernate.validator"       %  "hibernate-validator-annotation-processor" % hibernateValidatorVersion,
   "org.glassfish"                 %  "javax.el"                                 % "3.0.1-b11",
   "com.typesafe.akka"             %  "akka-actor_2.13"                          % akkaVersion,
-  "com.google.guava"              %  "guava"                                    % "28.2-jre",
-  "com.typesafe.play"             %% "play-caffeine-cache"                      % "2.8.0-M4",
   "commons-io"                    %  "commons-io"                               % apacheCommonsVersion,
   "commons-lang"                  %  "commons-lang"                             % apacheCommonsVersion,
   "org.asynchttpclient"           %  "async-http-client"                        % "2.12.1",
+  "com.google.guava"              %  "guava"                                    % "28.2-jre",
   "com.google.cloud"              %  "google-cloud-logging"                     % "1.100.0",
-  "org.projectlombok"             %  "lombok"                                   % "1.18.12"
+  "org.projectlombok"             %  "lombok"                                   % "1.18.12",
+  "io.lettuce"                    %  "lettuce-core"                             % "6.1.4.RELEASE",
+  "com.esotericsoftware"          %  "kryo"                                     % "5.2.0"
 )
 
 lazy val root = (project in file("."))
