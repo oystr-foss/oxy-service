@@ -1,5 +1,5 @@
 FROM oystrcombr/oystr-base-java:latest
-MAINTAINER Luan Melo - luan.sm50@gmail.com - luan.melo@oystr.com.br
+MAINTAINER Rafael Silvério - rafael.silverio.it@gmail.com - rafael.silverio@oystr.com.br
 
 LABEL oystr.container.type=oystr-service
 
