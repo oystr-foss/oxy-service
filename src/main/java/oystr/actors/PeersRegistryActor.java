@@ -24,6 +24,8 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static oystr.models.PeerState.*;
@@ -56,6 +58,9 @@ public class PeersRegistryActor extends AbstractActor {
         Duration discoveryDelay = conf.getDuration("oxy.discovery.delay");
         Duration discoveryInterval = conf.getDuration("oxy.discovery.interval");
         this.checkUrl = conf.getString("oxy.health-check.url");
+        Integer threadPoolSize = conf.getInt("oxy.thread-pool.size");
+
+        ExecutionContext ctx = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(threadPoolSize));
 
         Scheduler scheduler = services.sys().scheduler();
         scheduler.schedule(
@@ -63,7 +68,7 @@ public class PeersRegistryActor extends AbstractActor {
             healthCheckInterval,
             getSelf(),
             new HealthCheck(),
-            ExecutionContext.global(),
+            ctx,
             ActorRef.noSender()
         );
 
@@ -72,7 +77,7 @@ public class PeersRegistryActor extends AbstractActor {
             discoveryInterval,
             getSelf(),
             new Discovery(),
-            ExecutionContext.global(),
+            ctx,
             ActorRef.noSender()
         );
 
@@ -91,36 +96,39 @@ public class PeersRegistryActor extends AbstractActor {
         peers.forEach((key, value) -> {
             ProxyServer proxy = new ProxyServer.Builder(value.getHost(), value.getPort()).build();
 
-            http
-                .head(checkUrl, proxy)
-                .whenCompleteAsync((res, err) -> {
-                    logger.debug(String.format("healthcheck finished for %s with %d and %s", value.toString(), res.getStatusCode(), err));
-                    if(err != null || res.getStatusCode() != 200) {
-                        value.setLastHealthCheck(LocalDateTime.now());
-                        switch (value.getState()) {
-                            case UNKNOWN:
-                            case RUNNING:
-                                value.setState(PENDING);
-                                cache.put(key, value);
-                                break;
-                            case PENDING:
-                                value.setState(FAILING);
-                                cache.put(key, value);
-                                break;
-                            case FAILING:
-                                value.setState(DISABLED);
-                                cache.put(key, value);
-                                break;
-                            case DISABLED:
-                                logger.debug("Peer removed: " + value);
-                                cache.invalidate(key);
-                        }
-                        return;
-                    }
-                    value.setLastHealthCheck(LocalDateTime.now());
-                    value.setState(RUNNING);
-                    cache.put(key, value);
-                });
+            try {
+               Response res = http
+                    .head(checkUrl, proxy)
+                    .get(10, TimeUnit.SECONDS);
+
+                logger.debug(String.format("healthcheck finished for %s with %d and no errors.", value, res.getStatusCode()));
+
+                value.setLastHealthCheck(LocalDateTime.now());
+                value.setState(RUNNING);
+                cache.put(key, value);
+            } catch (Exception e) {
+                logger.debug(String.format("[%s] healthcheck finished for %s with an error: '%s'.", e.getClass().getSimpleName(), value, e.getMessage()));
+
+                value.setLastHealthCheck(LocalDateTime.now());
+                switch (value.getState()) {
+                    case UNKNOWN:
+                    case RUNNING:
+                        value.setState(PENDING);
+                        cache.put(key, value);
+                        break;
+                    case PENDING:
+                        value.setState(FAILING);
+                        cache.put(key, value);
+                        break;
+                    case FAILING:
+                        value.setState(DISABLED);
+                        cache.put(key, value);
+                        break;
+                    case DISABLED:
+                        logger.debug("Peer removed: " + value);
+                        cache.invalidate(key);
+                }
+            }
         });
     }
 
@@ -128,7 +136,7 @@ public class PeersRegistryActor extends AbstractActor {
     public Receive createReceive() {
         return receiveBuilder()
             .match(Discovery.class, req -> {
-                // TODO: It's our internal use case. Since we OpenVPN knows who are connected, we may discover clients automatically.
+                // TODO: It's our internal use case. Since OpenVPN knows who are connected, we may discover clients automatically.
                 // TODO: We are sharing the /tmp directory of both containers.
                 String[] cmd = {"/bin/sh", "-c", "cat /tmp/openvpn-status.log | grep \"192.168.255\" | awk -F\",\" '{print $1 \" \" $2}'"};
                 Process p = Runtime.getRuntime().exec(cmd);
