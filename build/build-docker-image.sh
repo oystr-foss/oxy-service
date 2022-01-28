@@ -16,6 +16,7 @@ unzip -q ../target/universal/package.zip -d tmp
 pip3 install -r requirements.txt &&
  ./get-build-info.py --repo .. --info --with-date > tmp/conf/build-info.txt
 cp Dockerfile tmp
+cp wait-for-it.sh tmp
 
 cat << EOF > tmp/run
 #!/usr/bin/env bash

@@ -3,6 +3,7 @@ MAINTAINER Rafael Silvério - rafael.silverio.it@gmail.com - rafael.silverio@oys
 
 LABEL oystr.container.type=oystr-service
 
+COPY wait-for-it.sh /opt/oystr/service/bin/wait-for-it.sh
 ADD bin  /opt/oystr/service/bin
 ADD conf /opt/oystr/service/conf
 ADD lib  /opt/oystr/service/lib
