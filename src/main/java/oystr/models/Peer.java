@@ -44,7 +44,6 @@ public class Peer implements Serializable {
     }
 
     public String toHash() {
-        String payload = String.format("%s-%s-%s", serviceId, host, port);
-        return Base64.getEncoder().encodeToString(payload.getBytes());
+        return Base64.getEncoder().encodeToString(serviceId.getBytes());
     }
 }

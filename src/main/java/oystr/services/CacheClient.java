@@ -2,7 +2,6 @@ package oystr.services;
 
 import oystr.models.Peer;
 
-import java.util.Collection;
 import java.util.List;
 
 public interface CacheClient {
@@ -15,6 +14,12 @@ public interface CacheClient {
     Long size();
 
     List<Peer> findAll();
+
+    List<String> findAllSnapshots();
+
+    List<Peer> findSnapshot(String prefix);
+
+    void takeSnapshot();
 
     List<Peer> findAllRunning();
 

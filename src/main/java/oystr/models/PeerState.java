@@ -9,7 +9,8 @@ public enum PeerState {
     RUNNING("running"),
     PENDING("pending"),
     FAILING("failing"),
-    DISABLED("disabled");
+    DISABLED("disabled"),
+    AVOID("avoid");
 
     @Getter
     public String value;

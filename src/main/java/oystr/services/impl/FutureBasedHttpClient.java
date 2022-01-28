@@ -1,8 +1,6 @@
 package oystr.services.impl;
 
 import org.asynchttpclient.AsyncHttpClient;
-import org.asynchttpclient.Request;
-import org.asynchttpclient.RequestBuilder;
 import org.asynchttpclient.Response;
 import org.asynchttpclient.proxy.ProxyServer;
 import oystr.services.HttpClient;
@@ -12,6 +10,8 @@ import javax.inject.Singleton;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 
 @Singleton
 public class FutureBasedHttpClient implements HttpClient<Response> {
@@ -26,7 +26,7 @@ public class FutureBasedHttpClient implements HttpClient<Response> {
     }
 
     @Override
-    public CompletableFuture<Response> get(String url, Map<String, String> headers) {
+    public CompletableFuture<Response> get(String url, Map<String, String> headers, Executor ctx) {
         return client
             .prepareGet(url)
             .setSingleHeaders(headers)
@@ -36,13 +36,19 @@ public class FutureBasedHttpClient implements HttpClient<Response> {
     }
 
     @Override
-    public CompletableFuture<Response> head(String url, ProxyServer proxy) {
-        return client
-            .prepareHead(url)
-            .setProxyServer(proxy)
-            .setSingleHeaders(ua)
-            .setRequestTimeout(10 * 1000)
-            .execute()
-            .toCompletableFuture();
+    public CompletableFuture<Response> head(String url, ProxyServer proxy, Executor ctx) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return client
+                    .prepareHead(url)
+                    .setProxyServer(proxy)
+                    .setSingleHeaders(ua)
+                    .setRequestTimeout(10 * 1000)
+                    .execute()
+                    .get();
+            } catch (InterruptedException | ExecutionException e) {
+                return null;
+            }
+        }, ctx);
     }
 }

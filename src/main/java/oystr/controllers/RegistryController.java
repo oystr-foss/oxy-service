@@ -6,10 +6,7 @@ import oystr.akka.Inquire;
 import oystr.akka.RootActors;
 import oystr.models.Peer;
 import oystr.models.PeerState;
-import oystr.models.messages.AddPeerRequest;
-import oystr.models.messages.DeletePeerRequest;
-import oystr.models.messages.FindPeersRequest;
-import oystr.models.messages.MetadataRequest;
+import oystr.models.messages.*;
 import oystr.services.Services;
 import oystr.validators.PojoValidator;
 import play.Logger;
@@ -18,6 +15,8 @@ import play.mvc.*;
 
 import javax.inject.Inject;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -102,12 +101,10 @@ public class RegistryController extends Controller {
         return delete(req);
     }
 
-    public CompletionStage<Result> delete(String serviceId, String host, Integer port) {
+    public CompletionStage<Result> delete(String serviceId) {
         DeletePeerRequest req = DeletePeerRequest
             .builder()
             .serviceId(serviceId)
-            .host(host)
-            .port(port)
             .deleteAll(false)
             .build();
         return delete(req);
@@ -117,11 +114,64 @@ public class RegistryController extends Controller {
         return validator.validate(data);
     }
 
+    public CompletionStage<Result> toggleTaintPeer(String serviceId) {
+        TaintPeerRequest req = TaintPeerRequest
+            .builder()
+            .serviceId(serviceId)
+            .build();
+
+        return Inquire
+            .inquire(actors.peersRegistryActor(), req, services.sys())
+            .handleAsync((res, throwable) -> {
+                if (throwable != null) {
+                    return Results.internalServerError(throwable.getMessage());
+                }
+                return Results.noContent();
+            });
+    }
+
     public CompletionStage<Result> find(Boolean onlyRunning) {
         FindPeersRequest req = FindPeersRequest
             .builder()
             .onlyRunning(onlyRunning)
             .build();
+
+        return Inquire
+            .inquire(actors.peersRegistryActor(), req, services.sys())
+            .handleAsync((res, throwable) -> {
+                if (throwable != null) {
+                    return Results.internalServerError(throwable.getMessage());
+                }
+                Optional<JsonNode> r = (Optional<JsonNode>) res;
+                return r.map(Results::ok).orElse(Results.notFound());
+            });
+    }
+
+    public CompletionStage<Result> findSnapshot(String date) {
+        try {
+            LocalDateTime.parse(date, DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"));
+        } catch (DateTimeParseException ex) {
+            return CompletableFuture.completedFuture(Results.badRequest("Date must be in yyyyMMdd-HHmm format."));
+        }
+
+        FindSnapshotRequest req = FindSnapshotRequest
+            .builder()
+            .date(date)
+            .build();
+
+        return Inquire
+            .inquire(actors.peersRegistryActor(), req, services.sys())
+            .handleAsync((res, throwable) -> {
+                if (throwable != null) {
+                    return Results.internalServerError(throwable.getMessage());
+                }
+                Optional<JsonNode> r = (Optional<JsonNode>) res;
+                return r.map(Results::ok).orElse(Results.notFound());
+            });
+    }
+
+    public CompletionStage<Result> findAllSnapshots() {
+        FindSnapshotKeysRequest req = FindSnapshotKeysRequest.builder().build();
 
         return Inquire
             .inquire(actors.peersRegistryActor(), req, services.sys())

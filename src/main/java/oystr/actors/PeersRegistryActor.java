@@ -8,6 +8,7 @@ import com.typesafe.config.Config;
 import org.asynchttpclient.Response;
 import org.asynchttpclient.proxy.ProxyServer;
 import oystr.models.Peer;
+import oystr.models.PeerState;
 import oystr.models.messages.*;
 import oystr.services.CacheClient;
 import oystr.services.HttpClient;
@@ -22,8 +23,9 @@ import java.io.InputStreamReader;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import static oystr.models.PeerState.*;
 
@@ -40,6 +42,8 @@ public class PeersRegistryActor extends AbstractActor {
     private final String checkUrl;
 
     private final Boolean isLeader;
+
+    private final ExecutorService executor;
 
     private Map<String, Peer> luminatiPeers;
 
@@ -64,9 +68,12 @@ public class PeersRegistryActor extends AbstractActor {
         Duration healthCheckInterval = conf.getDuration("oxy.health-check.interval");
         Duration discoveryDelay = conf.getDuration("oxy.discovery.delay");
         Duration discoveryInterval = conf.getDuration("oxy.discovery.interval");
+        Duration snapshotDelay = conf.getDuration("oxy.snapshot.delay");
+        Duration snapshotInterval = conf.getDuration("oxy.snapshot.interval");
 
         Integer threadPoolSize = conf.getInt("oxy.thread-pool.size");
-        ExecutionContext ctx = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(threadPoolSize));
+        this.executor = Executors.newFixedThreadPool(threadPoolSize);
+        ExecutionContext ctx = ExecutionContext.fromExecutor(executor);
 
         Scheduler scheduler = services.sys().scheduler();
         scheduler.schedule(
@@ -87,10 +94,19 @@ public class PeersRegistryActor extends AbstractActor {
             ActorRef.noSender()
         );
 
+        scheduler.schedule(
+            snapshotDelay,
+            snapshotInterval,
+            getSelf(),
+            new Snapshot(),
+            getContext().getDispatcher(),
+            ActorRef.noSender()
+        );
+
         if(conf.hasPath("luminati.address")) {
             String luminatiAddress = conf.getString("luminati.address");
-            Peer default1 = Peer.builder().name("default1").host(luminatiAddress).port(24000).build();
-            Peer default2 = Peer.builder().name("default2").host(luminatiAddress).port(24001).build();
+            Peer default1 = Peer.builder().serviceId("default1").name("default1").host(luminatiAddress).port(24000).build();
+            Peer default2 = Peer.builder().serviceId("default2").name("default2").host(luminatiAddress).port(24001).build();
             luminatiPeers = new HashMap<>();
             luminatiPeers.put(default1.toHash(), default1);
             luminatiPeers.put(default2.toHash(), default2);
@@ -101,12 +117,37 @@ public class PeersRegistryActor extends AbstractActor {
     public Receive createReceive() {
         return receiveBuilder()
             .match(Discovery.class, this::autoDiscovery)
+            .match(Snapshot.class, req -> {
+                if(isLeader) {
+                    cache.takeSnapshot();
+                }
+            })
             .match(HealthCheck.class, req -> healthCheck())
             .match(AddPeerRequest.class, req -> cache.add(req.getPeer()))
             .match(FindPeersRequest.class, req -> {
                 Boolean onlyRunning = req.getOnlyRunning();
                 JsonNode res = onlyRunning ? findAllActive() : findAll();
                 getSender().tell(Optional.of(res), getSelf());
+            })
+            .match(FindSnapshotRequest.class, req -> {
+                List<Peer> data = cache.findSnapshot(req.getDate());
+                JsonNode res = Json.toJson(data);
+                getSender().tell(Optional.of(res), getSender());
+            })
+            .match(FindSnapshotKeysRequest.class, req -> {
+                List<String> data = cache.findAllSnapshots();
+                JsonNode res = Json.toJson(data);
+                getSender().tell(Optional.of(res), getSender());
+            })
+            .match(TaintPeerRequest.class, req -> {
+                String key = Base64.getEncoder().encodeToString(req.getServiceId().getBytes());
+                Peer peer = cache.getIfPresent(key);
+                if(peer != null) {
+                    PeerState state = peer.getState().equals(AVOID) ? UNKNOWN : AVOID;
+                    peer.setState(state);
+                    cache.add(peer);
+                }
+                getSender().tell(true, getSelf());
             })
             .match(DeletePeerRequest.class, req -> {
                 Boolean deleteAll = req.getDeleteAll();
@@ -122,7 +163,7 @@ public class PeersRegistryActor extends AbstractActor {
                     String execution = req.getExecutionId().get();
                     getContext()
                         .findChild("metrics-actor")
-                        .ifPresent(actor -> actor.tell(execution, getSelf()));
+                        .ifPresent(actor -> actor.tell(execution, ActorRef.noSender()));
                 }
                 getSender().tell(loadBalancerUrl, getSelf());
             })
@@ -137,15 +178,19 @@ public class PeersRegistryActor extends AbstractActor {
     }
 
     private JsonNode findAllActive() {
-        List<Peer> listServices = cache.findAllRunning();
+        List<Peer> listServices = cache
+            .findAllRunning()
+            .stream()
+            .filter(p -> !p.getState().equals(AVOID))
+            .collect(Collectors.toList());
+
         return listServices.isEmpty() && luminatiPeers != null ?
             Json.toJson(luminatiPeers.values()) :
             Json.toJson(listServices);
     }
 
     private void delete(DeletePeerRequest req) {
-        String payload = String.format("%s-%s-%s", req.getServiceId(), req.getHost(), req.getPort());
-        String key = Base64.getEncoder().encodeToString(payload.getBytes());
+        String key = Base64.getEncoder().encodeToString(req.getServiceId().getBytes());
         cache.remove(key);
     }
 
@@ -155,7 +200,7 @@ public class PeersRegistryActor extends AbstractActor {
         }
         // TODO: It's our internal use case. Since OpenVPN knows who are connected, we may discover clients automatically.
         // TODO: We are sharing the /tmp directory of both containers.
-        String[] cmd = {"/bin/sh", "-c", "cat /tmp/openvpn-status.log | grep \"192.168.255\" | awk -F\",\" '{print $1 \" \" $2}'"};
+        String[] cmd = {"/bin/sh", "-c", "cat /tmp/openvpn-status.log | grep \"192.168.\" | awk -F\",\" '{print $1 \" \" $2}'"};
         Process p = Runtime.getRuntime().exec(cmd);
         p.waitFor();
 
@@ -169,6 +214,11 @@ public class PeersRegistryActor extends AbstractActor {
 
             String host = raw[0];
             String name = raw[1];
+
+            if(name.equalsIgnoreCase("oystr-sa")) {
+                continue;
+            }
+
             Peer peer = Peer
                 .builder()
                 .serviceId(String.format("proxy-%s", name))
@@ -188,48 +238,63 @@ public class PeersRegistryActor extends AbstractActor {
     }
 
     private void healthCheck() {
-        if(!isLeader || cache.size() == 0) {
+        List<Peer> all = cache
+            .findAll()
+            .stream()
+            .filter(p -> !p.getState().equals(AVOID))
+            .collect(Collectors.toList());
+
+        if(!isLeader || all.size() == 0) {
             return;
         }
-        logger.debug("running health check with " + cache.size() + " registered peers (even those not running)");
 
-        Collection<Peer> peers = cache.findAll();
-        peers.forEach(value -> {
+        logger.debug(String.format("[SUCCESS] running health check with %d registered peers (except for those tainted)", all.size()));
+        all.forEach(value -> {
+            if(value.getState().equals(AVOID)) {
+                return;
+            }
             ProxyServer proxy = new ProxyServer.Builder(value.getHost(), value.getPort()).build();
 
-            try {
-                Response res = http
-                        .head(checkUrl, proxy)
-                        .get(10, TimeUnit.SECONDS);
+            http
+                .head(checkUrl, proxy, executor)
+                .whenCompleteAsync((res, err) -> {
+                    if(err != null || res == null) {
+                        if(res == null) {
+                            logger.error(String.format("[%s] healthcheck finished for %s with an ExecutionException (host unavailable), TimeoutException or InterruptedException.", "ERROR", value));
+                        }
 
-                logger.debug(String.format("healthcheck finished for %s with %d and no errors.", value, res.getStatusCode()));
+                        if(err != null) {
+                            logger.error(String.format("[%s] healthcheck finished for %s with an error: '%s'.", err.getClass().getSimpleName(), value, err.getMessage()));
+                        }
 
-                value.setLastHealthCheck(LocalDateTime.now());
-                value.setState(RUNNING);
-                cache.add(value);
-            } catch (Exception e) {
-                logger.debug(String.format("[%s] healthcheck finished for %s with an error: '%s'.", e.getClass().getSimpleName(), value, e.getMessage()));
+                        value.setLastHealthCheck(LocalDateTime.now());
+                        switch (value.getState()) {
+                            case UNKNOWN:
+                            case RUNNING:
+                                value.setState(PENDING);
+                                cache.add(value);
+                                break;
+                            case PENDING:
+                                value.setState(FAILING);
+                                cache.add(value);
+                                break;
+                            case FAILING:
+                                value.setState(DISABLED);
+                                cache.add(value);
+                                break;
+                            case DISABLED:
+                                logger.debug(String.format("[%s] Peer removed: %s", getClass().getSimpleName(), value));
+                                cache.remove(value.toHash());
+                        }
+                        return;
+                    }
 
-                value.setLastHealthCheck(LocalDateTime.now());
-                switch (value.getState()) {
-                    case UNKNOWN:
-                    case RUNNING:
-                        value.setState(PENDING);
-                        cache.add(value);
-                        break;
-                    case PENDING:
-                        value.setState(FAILING);
-                        cache.add(value);
-                        break;
-                    case FAILING:
-                        value.setState(DISABLED);
-                        cache.add(value);
-                        break;
-                    case DISABLED:
-                        logger.debug("Peer removed: " + value);
-                        cache.remove(value.toHash());
-                }
-            }
+                    logger.debug(String.format("[%s] healthcheck finished for %s with %d and no errors.", getClass().getSimpleName(), value, res.getStatusCode()));
+
+                    value.setLastHealthCheck(LocalDateTime.now());
+                    value.setState(RUNNING);
+                    cache.add(value);
+                }, executor);
         });
     }
 }

@@ -104,19 +104,19 @@ public class MetricsCollectorActor extends AbstractActor {
                 logger.info(String.format("Flushing %d data points", buffer.size()));
                 buffer.clear();
             } catch (Exception e) {
-                logger.debug("Error while writing data to stackdriver", e);
+                logger.error("Error while writing data to stackdriver", e);
             }
         }
     }
 
     private void collect(String execution) {
-        if(enabled) {
+        if(enabled && execution != null) {
             String url = String.format(apiUrl, execution);
             Map<String, String> headers = new HashMap<>();
             headers.put(apiHeader, apiKey);
 
             http
-                .get(url, headers)
+                .get(url, headers, getContext().dispatcher())
                 .whenCompleteAsync((res, err) -> {
                     if(err != null || res.getStatusCode() != 200) {
                         logger.error(String.format("Couldn't get info for %s.", execution));
