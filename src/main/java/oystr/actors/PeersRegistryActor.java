@@ -116,7 +116,7 @@ public class PeersRegistryActor extends AbstractActor {
     @Override
     public Receive createReceive() {
         return receiveBuilder()
-            .match(Discovery.class, this::autoDiscovery)
+            .match(Discovery.class, req -> autoDiscovery())
             .match(Snapshot.class, req -> {
                 if(isLeader) {
                     cache.takeSnapshot();
@@ -124,20 +124,26 @@ public class PeersRegistryActor extends AbstractActor {
             })
             .match(HealthCheck.class, req -> healthCheck())
             .match(AddPeerRequest.class, req -> cache.add(req.getPeer()))
+            .match(FindHiddenPeerRequest.class, req -> {
+                Peer nullablePeer = cache.getIfPresent(req.getAccount());
+                Optional<Peer> maybePeer = Optional.ofNullable(nullablePeer);
+                JsonNode res = Json.toJson(maybePeer);
+                getSender().tell(res, getSender());
+            })
             .match(FindPeersRequest.class, req -> {
                 Boolean onlyRunning = req.getOnlyRunning();
                 JsonNode res = onlyRunning ? findAllActive() : findAll();
-                getSender().tell(Optional.of(res), getSelf());
+                getSender().tell(res, getSelf());
             })
             .match(FindSnapshotRequest.class, req -> {
                 List<Peer> data = cache.findSnapshot(req.getDate());
                 JsonNode res = Json.toJson(data);
-                getSender().tell(Optional.of(res), getSender());
+                getSender().tell(res, getSender());
             })
             .match(FindSnapshotKeysRequest.class, req -> {
                 List<String> data = cache.findAllSnapshots();
                 JsonNode res = Json.toJson(data);
-                getSender().tell(Optional.of(res), getSender());
+                getSender().tell(res, getSender());
             })
             .match(TaintPeerRequest.class, req -> {
                 String key = Base64.getEncoder().encodeToString(req.getServiceId().getBytes());
@@ -178,11 +184,7 @@ public class PeersRegistryActor extends AbstractActor {
     }
 
     private JsonNode findAllActive() {
-        List<Peer> listServices = cache
-            .findAllRunning()
-            .stream()
-            .filter(p -> !p.getState().equals(AVOID))
-            .collect(Collectors.toList());
+        List<Peer> listServices = cache.findAllRunning();
 
         return listServices.isEmpty() && luminatiPeers != null ?
             Json.toJson(luminatiPeers.values()) :
@@ -194,7 +196,7 @@ public class PeersRegistryActor extends AbstractActor {
         cache.remove(key);
     }
 
-    private void autoDiscovery(Discovery req) throws IOException, InterruptedException {
+    private void autoDiscovery() throws IOException, InterruptedException {
         if (!isLeader) {
             return;
         }
@@ -219,6 +221,7 @@ public class PeersRegistryActor extends AbstractActor {
                 continue;
             }
 
+            name = name.replaceAll("[^\\d\\w]+", "");
             Peer peer = Peer
                 .builder()
                 .serviceId(String.format("proxy-%s", name))

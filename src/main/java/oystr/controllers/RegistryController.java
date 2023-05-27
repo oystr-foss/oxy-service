@@ -9,7 +9,6 @@ import oystr.models.PeerState;
 import oystr.models.messages.*;
 import oystr.services.Services;
 import oystr.validators.PojoValidator;
-import play.Logger;
 import play.libs.Json;
 import play.mvc.*;
 
@@ -23,7 +22,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 public class RegistryController extends Controller {
-    private final Logger.ALogger logger;
 
     private final PojoValidator validator;
 
@@ -39,7 +37,6 @@ public class RegistryController extends Controller {
         this.actors = actors;
         this.services = services;
         this.validator = PojoValidator.getInstance();
-        this.logger = services.logger("application");
     }
 
     public CompletionStage<Result> loadBalancer(Http.Request request) {
@@ -84,7 +81,6 @@ public class RegistryController extends Controller {
                 }
             });
 
-        logger.debug(peer.toString());
         return CompletableFuture.completedFuture(Results.ok(Json.toJson(peer)));
     }
 
@@ -142,9 +138,27 @@ public class RegistryController extends Controller {
                 if (throwable != null) {
                     return Results.internalServerError(throwable.getMessage());
                 }
-                Optional<JsonNode> r = (Optional<JsonNode>) res;
-                return r.map(Results::ok).orElse(Results.notFound());
+                return Results.ok((JsonNode) res);
             });
+    }
+
+    public CompletionStage<Result> findHiddenForAccount(Long accountId) {
+        FindHiddenPeerRequest req = FindHiddenPeerRequest
+            .builder()
+            .account(accountId)
+            .build();
+
+        return Inquire
+                .inquire(actors.peersRegistryActor(), req, services.sys())
+                .handleAsync((res, throwable) -> {
+                    if (throwable != null) {
+                        return Results.internalServerError(throwable.getMessage());
+                    } else if(res == null || res.toString().equalsIgnoreCase("null")) {
+                        return Results.notFound();
+                    }
+
+                    return Results.ok((JsonNode) res);
+                });
     }
 
     public CompletionStage<Result> findSnapshot(String date) {
@@ -165,8 +179,7 @@ public class RegistryController extends Controller {
                 if (throwable != null) {
                     return Results.internalServerError(throwable.getMessage());
                 }
-                Optional<JsonNode> r = (Optional<JsonNode>) res;
-                return r.map(Results::ok).orElse(Results.notFound());
+                return Results.ok((JsonNode) res);
             });
     }
 
@@ -179,8 +192,7 @@ public class RegistryController extends Controller {
                 if (throwable != null) {
                     return Results.internalServerError(throwable.getMessage());
                 }
-                Optional<JsonNode> r = (Optional<JsonNode>) res;
-                return r.map(Results::ok).orElse(Results.notFound());
+                return Results.ok((JsonNode) res);
             });
     }
 

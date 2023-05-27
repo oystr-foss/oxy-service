@@ -1,5 +1,6 @@
 GET    /lb                                  oystr.controllers.RegistryController.loadBalancer(req: Request)
 GET    /services                            oystr.controllers.RegistryController.findAllActive
+GET    /services/hidden/:accountId          oystr.controllers.RegistryController.findHiddenForAccount(accountId: Long)
 GET    /services/all                        oystr.controllers.RegistryController.findAll
 POST   /services                            oystr.controllers.RegistryController.register(req: Request)
 PUT    /services/:serviceId                 oystr.controllers.RegistryController.toggleTaintPeer(serviceId: String)

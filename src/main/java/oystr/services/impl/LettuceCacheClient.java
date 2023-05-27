@@ -1,5 +1,7 @@
 package oystr.services.impl;
 
+import com.google.common.collect.ImmutableMap;
+import com.typesafe.config.ConfigValue;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.sync.RedisCommands;
@@ -13,10 +15,7 @@ import javax.inject.Inject;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -27,31 +26,25 @@ public class LettuceCacheClient implements CacheClient {
     private final String redisBaseKey = "peers";
     private final Integer dbNumber;
 
+    @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
+    private final Optional<Map<String, Long>> hiddenPeersIds;
+
     @Inject
     public LettuceCacheClient(Codec<Peer> codec, Services services) throws Exception {
+        this.hiddenPeersIds = services
+            .conf()
+            .getConfig("oxy.peers.hidden-peers")
+            .entrySet()
+            .stream()
+            .map(this::toMap)
+            .reduce(this::reduce);
+
         String redisUrl = services.conf().getString("redis.url");
         this.dbNumber = parseDbNumber(redisUrl);
 
         RedisClient redisClient = RedisClient.create(redisUrl);
         StatefulRedisConnection<String, Peer> connection = redisClient.connect(codec);
         syncCommands = connection.sync();
-    }
-
-    private Integer parseDbNumber(String url) throws Exception {
-        Pattern pattern = Pattern.compile("redis://[^/]+/(\\d+)");
-        Matcher matcher = pattern.matcher(url);
-
-        if(!matcher.find()) {
-            return 0;
-        }
-
-        String match = matcher.group(1);
-
-        try {
-            return Integer.parseInt(match);
-        } catch (NumberFormatException e) {
-            throw new Exception("Invalid Redis database!", e);
-        }
     }
 
     @Override
@@ -67,6 +60,17 @@ public class LettuceCacheClient implements CacheClient {
             return syncCommands.hget(redisBaseKey, key);
         }
         return null;
+    }
+
+    @Override
+    public Peer getIfPresent(Long accountId) {
+        return retrieveServiceId(accountId)
+            .map(key -> "proxy-" + key)
+            .map(key -> {
+                String base64 = Base64.getEncoder().encodeToString(key.getBytes());
+                return getIfPresent(base64);
+            })
+            .orElse(null);
     }
 
     @Override
@@ -137,12 +141,63 @@ public class LettuceCacheClient implements CacheClient {
     public List<Peer> findAllRunning() {
         return findAll()
             .stream()
-            .filter(p -> p.getState().equals(PeerState.RUNNING))
+            .filter(p -> p.getState().equals(PeerState.RUNNING) && !isHidden(p))
             .collect(Collectors.toList());
     }
 
     @Override
     public void flush() {
         syncCommands.flushdb();
+    }
+
+    private Boolean isHidden(Peer peer) {
+        return hiddenPeersIds
+            .map(m -> m
+                .keySet()
+                .stream()
+                .anyMatch(k -> peer.getServiceId().toLowerCase().contains(k.toLowerCase()))
+            )
+            .orElse(false);
+    }
+
+    private Optional<String> retrieveServiceId(Long accountId) {
+        return hiddenPeersIds
+            .flatMap(m -> m
+                .entrySet()
+                .stream()
+                .filter(e -> e.getValue().equals(accountId))
+                .map(Map.Entry::getKey)
+                .findFirst()
+        );
+    }
+
+    private Map<String, Long> reduce(Map<String, Long> left, Map<String, Long> right) {
+        left.putAll(right);
+        return left;
+    }
+
+    private Map<String, Long> toMap(Map.Entry<String, ConfigValue> e) {
+        return new HashMap<String, Long>() {
+            {
+                put(e.getKey(),Long.parseLong(e.getValue().unwrapped().toString()));
+            }
+        };
+    }
+
+    private Integer parseDbNumber(String url) throws Exception {
+        Pattern pattern = Pattern.compile("redis://[^/]+/(\\d+)");
+        Matcher matcher = pattern.matcher(url);
+
+        if(!matcher.find()) {
+            return 0;
+        }
+
+        String match = matcher.group(1);
+
+        try {
+            return Integer.parseInt(match);
+        } catch (NumberFormatException e) {
+            throw new Exception("Invalid Redis database index!", e);
+        }
     }
 }

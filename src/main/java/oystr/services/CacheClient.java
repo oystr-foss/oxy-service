@@ -9,6 +9,8 @@ public interface CacheClient {
 
     Peer getIfPresent(String key);
 
+    Peer getIfPresent(Long accountId);
+
     void remove(String key);
 
     Long size();
